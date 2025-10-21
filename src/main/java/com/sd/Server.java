@@ -3,167 +3,207 @@ package com.sd;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
 
 public class Server extends Thread {
-    protected Socket clientSocket;
-    private static final Map<String, Map<String, String>> usuarios = Collections.synchronizedMap(new HashMap<>());
-    private static final Map<String, String> tokens = Collections.synchronizedMap(new HashMap<>());
+    private final Socket clientSocket;
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    // Simulações de persistência em memória para a EP1
+    // cpf -> { nome, senha, saldo(double como String p/ simplificar), ... }
+    private static final Map<String, Map<String, String>> usuarios = new ConcurrentHashMap<>();
+    // token -> cpf
+    private static final Map<String, String> tokens = new ConcurrentHashMap<>();
 
     public Server(Socket clientSocket) {
         this.clientSocket = clientSocket;
         start();
     }
 
+    @Override
     public void run() {
         try (
             PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()))
         ) {
-            ObjectMapper mapper = new ObjectMapper();
             boolean conectado = false;
-            String inputLine;
-            while ((inputLine = in.readLine()) != null) {
+            String input;
+            while ((input = in.readLine()) != null) {
                 try {
-                    Validator.validateClient(inputLine);
-                    Map<String, Object> recebido = mapper.readValue(inputLine, Map.class);
-                    String operacao = (String) recebido.get("operacao");
-                    Map<String, Object> resposta = new LinkedHashMap<>();
+                    // Garante que a mensagem recebida segue o protocolo (CLIENTE->SERVIDOR)
+                    Validator.validateClient(input);
 
+                    Map<String, Object> req = mapper.readValue(input, Map.class);
+                    String operacao = (String) req.get("operacao");
+                    Map<String, Object> resp = new LinkedHashMap<>();
+
+                    // Handshake obrigatório
                     if (!conectado && !"conectar".equals(operacao)) {
-                        resposta.put("operacao", operacao);
-                        resposta.put("status", false);
-                        resposta.put("info", "Erro, para receber uma operacao, a primeira operacao deve ser 'conectar'");
-                        out.println(mapper.writeValueAsString(resposta));
+                        resp.put("operacao", operacao);
+                        resp.put("status", false);
+                        resp.put("info", "Erro, para receber uma operacao, a primeira operacao deve ser 'conectar'");
+                        // Valida a resposta (SERVIDOR->CLIENTE)
+                        Validator.validateServer(mapper.writeValueAsString(resp));
+                        out.println(mapper.writeValueAsString(resp));
                         continue;
                     }
+
                     if ("conectar".equals(operacao)) {
                         conectado = true;
-                        resposta.put("operacao", "conectar");
-                        resposta.put("status", true);
-                        resposta.put("info", "Servidor conectado com sucesso.");
+                        resp.put("operacao", "conectar");
+                        resp.put("status", true);
+                        resp.put("info", "Servidor conectado com sucesso.");
                     } else if ("usuario_criar".equals(operacao)) {
-                        String cpf = (String) recebido.get("cpf");
+                        String cpf = ((String) req.get("cpf")).trim();
                         if (!usuarios.containsKey(cpf)) {
                             Map<String, String> dados = new HashMap<>();
-                            dados.put("nome", (String) recebido.get("nome"));
-                            dados.put("senha", (String) recebido.get("senha"));
+                            dados.put("nome", ((String) req.get("nome")).trim());
+                            dados.put("senha", ((String) req.get("senha")).trim());
+                            // saldo como string numérica para fácil conversão posterior
+                            dados.put("saldo", "0.0");
                             usuarios.put(cpf, dados);
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", true);
-                            resposta.put("info", "Usuário criado com sucesso.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Usuário criado com sucesso.");
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Ocorreu um erro ao criar usuário.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Ocorreu um erro ao criar usuário.");
                         }
                     } else if ("usuario_login".equals(operacao)) {
-                        String cpf = (String) recebido.get("cpf");
-                        String senha = (String) recebido.get("senha");
+                        String cpf = ((String) req.get("cpf")).trim();
+                        String senha = ((String) req.get("senha")).trim();
                         Map<String, String> dados = usuarios.get(cpf);
-                        if (dados != null && dados.get("senha").equals(senha)) {
+                        if (dados != null && Objects.equals(dados.get("senha"), senha)) {
                             String token = UUID.randomUUID().toString();
                             tokens.put(token, cpf);
-                            resposta.put("operacao", operacao);
-                            resposta.put("token", token);
-                            resposta.put("status", true);
-                            resposta.put("info", "Login bem-sucedido.");
+                            resp.put("operacao", operacao);
+                            resp.put("token", token);
+                            resp.put("status", true);
+                            resp.put("info", "Login bem-sucedido.");
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Ocorreu um erro ao realizar login.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Ocorreu um erro ao realizar login.");
                         }
                     } else if ("usuario_ler".equals(operacao)) {
-                        String token = (String) recebido.get("token");
+                        String token = ((String) req.get("token"));
                         String cpf = tokens.get(token);
-                        Map<String, String> dados = usuarios.get(cpf);
+                        Map<String, String> dados = cpf != null ? usuarios.get(cpf) : null;
                         if (dados != null) {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", true);
-                            resposta.put("info", "Dados do usuário recuperados com sucesso.");
                             Map<String, Object> usuario = new LinkedHashMap<>();
                             usuario.put("cpf", cpf);
                             usuario.put("nome", dados.get("nome"));
-                            usuario.put("saldo", 0.0);
-                            resposta.put("usuario", usuario);
+                            // saldo precisa ser numérico (double) na resposta
+                            double saldo = 0.0;
+                            try { saldo = Double.parseDouble(dados.getOrDefault("saldo", "0.0")); } catch (Exception ignore) {}
+                            usuario.put("saldo", saldo);
+
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Dados do usuário recuperados com sucesso.");
+                            resp.put("usuario", usuario);
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Erro ao ler dados do usuário.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Erro ao ler dados do usuário.");
                         }
                     } else if ("usuario_atualizar".equals(operacao)) {
-                        String token = (String) recebido.get("token");
+                        String token = ((String) req.get("token"));
                         String cpf = tokens.get(token);
-                        Map<String, String> dados = usuarios.get(cpf);
-                        Map<String, Object> usuario = (Map<String, Object>) recebido.get("usuario");
-                        if (dados != null && usuario != null) {
-                            if (usuario.containsKey("nome")) dados.put("nome", (String) usuario.get("nome"));
-                            if (usuario.containsKey("senha")) dados.put("senha", (String) usuario.get("senha"));
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", true);
-                            resposta.put("info", "Usuário atualizado com sucesso.");
+                        Map<String, String> dados = cpf != null ? usuarios.get(cpf) : null;
+                        Map<String, Object> usuarioReq = (Map<String, Object>) req.get("usuario");
+                        if (dados != null && usuarioReq != null) {
+                            if (usuarioReq.containsKey("nome")) {
+                                String n = ((String) usuarioReq.get("nome")).trim();
+                                if (!n.isBlank()) dados.put("nome", n);
+                            }
+                            if (usuarioReq.containsKey("senha")) {
+                                String s = ((String) usuarioReq.get("senha")).trim();
+                                if (!s.isBlank()) dados.put("senha", s);
+                            }
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Usuário atualizado com sucesso.");
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Erro ao atualizar usuário.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Erro ao atualizar usuário.");
                         }
                     } else if ("usuario_deletar".equals(operacao)) {
-                        String token = (String) recebido.get("token");
+                        String token = ((String) req.get("token"));
                         String cpf = tokens.get(token);
-                        if (usuarios.containsKey(cpf)) {
+                        if (cpf != null && usuarios.containsKey(cpf)) {
                             usuarios.remove(cpf);
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", true);
-                            resposta.put("info", "Usuário deletado com sucesso.");
+                            // opcional: invalidar token também
+                            tokens.values().removeIf(v -> Objects.equals(v, cpf));
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Usuário deletado com sucesso.");
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Erro ao deletar usuário.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Erro ao deletar usuário.");
                         }
                     } else if ("usuario_logout".equals(operacao)) {
-                        String token = (String) recebido.get("token");
+                        String token = ((String) req.get("token"));
                         if (token != null && tokens.containsKey(token)) {
                             tokens.remove(token);
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", true);
-                            resposta.put("info", "Logout realizado com sucesso.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Logout realizado com sucesso.");
                         } else {
-                            resposta.put("operacao", operacao);
-                            resposta.put("status", false);
-                            resposta.put("info", "Ocorreu um erro ao realizar logout.");
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Ocorreu um erro ao realizar logout.");
                         }
                     } else {
-                        resposta.put("operacao", operacao);
-                        resposta.put("status", false);
-                        resposta.put("info", "Operação desconhecida.");
+                        // Padrão de operação desconhecida
+                        resp.put("operacao", operacao);
+                        resp.put("status", false);
+                        resp.put("info", "Operação desconhecida.");
                     }
-                    try { Validator.validateServer(mapper.writeValueAsString(resposta)); } catch (Exception e) { e.printStackTrace(); }
-                    out.println(mapper.writeValueAsString(resposta));
+
+                    // Valida a resposta antes de enviar (SERVIDOR->CLIENTE)
+                    String jsonResp = mapper.writeValueAsString(resp);
+                    try { Validator.validateServer(jsonResp); } catch (Exception e) { e.printStackTrace(); }
+                    out.println(jsonResp);
+
                 } catch (Exception e) {
+                    // Entrada inválida ou falha interna: responda no envelope esperado
                     Map<String, Object> erro = new LinkedHashMap<>();
                     erro.put("operacao", "conectar");
                     erro.put("status", false);
                     erro.put("info", "Exceção: " + e.getMessage());
-                    out.println(new ObjectMapper().writeValueAsString(erro));
+                    String jsonErro = mapper.writeValueAsString(erro);
+                    try { Validator.validateServer(jsonErro); } catch (Exception ignore) {}
+                    out.println(jsonErro);
                 }
             }
         } catch (Exception e) {
             e.printStackTrace();
+        } finally {
+            try { clientSocket.close(); } catch (IOException ignore) {}
         }
     }
 
-    public static void main(String[] args) throws IOException {
-        BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        System.out.print("Qual porta o servidor deve usar? ");
-        int porta = Integer.parseInt(br.readLine());
-        try (ServerSocket serverSocket = new ServerSocket(porta)) {
-            System.out.println("Servidor rodando na porta " + porta);
-            while (true) {
-                new Server(serverSocket.accept());
-                System.out.println("Cliente conectado!");
+    public static void main(String[] args) {
+        try (BufferedReader br = new BufferedReader(new InputStreamReader(System.in))) {
+            System.out.print("Qual porta o servidor deve usar? ");
+            int porta = Integer.parseInt(br.readLine());
+            try (ServerSocket serverSocket = new ServerSocket(porta)) {
+                System.out.println("Servidor rodando na porta " + porta);
+                while (true) {
+                    Socket s = serverSocket.accept();
+                    System.out.println("Cliente conectado: " + s.getRemoteSocketAddress());
+                    new Server(s);
+                }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }
