@@ -158,12 +158,12 @@ public class Server extends Thread {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         System.out.print("Qual porta o servidor deve usar? ");
         int porta = Integer.parseInt(br.readLine());
-        ServerSocket serverSocket = new ServerSocket(porta);
-        System.out.println("Servidor rodando na porta " + porta);
-
-        while (true) {
-            new Server(serverSocket.accept());
-            System.out.println("Cliente conectado!");
+        try (ServerSocket serverSocket = new ServerSocket(porta)) {
+            System.out.println("Servidor rodando na porta " + porta);
+            while (true) {
+                new Server(serverSocket.accept());
+                System.out.println("Cliente conectado!");
+            }
         }
     }
 }

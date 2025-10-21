@@ -21,9 +21,10 @@ public class Client {
             PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
 
-            // Envie "conectar" como primeira mensagem
+            // Conectar primeiro
             Map<String, Object> msgConectar = Map.of("operacao", "conectar");
             String jsonConectar = mapper.writeValueAsString(msgConectar);
+            System.out.println("DEBUG JSON conectar enviado: '" + jsonConectar + "'");
             try { Validator.validateClient(jsonConectar); } catch (Exception e) { e.printStackTrace(); }
             out.println(jsonConectar);
             String resposta = in.readLine();
