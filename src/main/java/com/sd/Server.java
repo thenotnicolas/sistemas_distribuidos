@@ -6,6 +6,8 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
@@ -14,10 +16,15 @@ public class Server extends Thread {
     private final Socket clientSocket;
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
+    private static final DateTimeFormatter ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
-    // Persistência em memória (EP1)
+    // Usuários e tokens
     private static final Map<String, Map<String, String>> usuarios = new ConcurrentHashMap<>();
     private static final Map<String, String> tokens = new ConcurrentHashMap<>();
+
+    // Histórico de transações (CPF -> lista de transações)
+    private static final Map<String, List<Map<String, Object>>> transacoes = new ConcurrentHashMap<>();
+    private static final AtomicInteger idTransacao = new AtomicInteger(1);
 
     public Server(Socket clientSocket) {
         this.clientSocket = clientSocket;
@@ -25,6 +32,7 @@ public class Server extends Thread {
     }
 
     private static String ts() { return "[" + LocalDateTime.now().format(TS) + "]"; }
+    private static String isoNow() { return LocalDateTime.now().format(ISO); }
 
     @Override
     public void run() {
@@ -45,13 +53,11 @@ public class Server extends Thread {
                     }
                     System.out.println(ts() + " [RECV] " + who + " -> " + input);
 
-                    // Validação de entrada (CLIENTE->SERVIDOR)
                     try {
                         Validator.validateClient(input);
                         System.out.println(ts() + " [OK  ] Validator.validateClient passed");
                     } catch (Exception ve) {
                         System.out.println(ts() + " [FAIL] validateClient: " + ve.getMessage());
-                        // Erros de JSON/estrutura → protocolo exige "null" e fechar
                         out.println("null");
                         System.out.println(ts() + " [SEND] null (closing) para " + who);
                         break;
@@ -89,7 +95,6 @@ public class Server extends Thread {
                             dados.put("senha", ((String) req.get("senha")).trim());
                             dados.put("saldo", "0.0");
                             usuarios.put(cpf, dados);
-                            System.out.println(ts() + " [INFO] Criado usuario cpf=" + cpf + " dados=" + dados);
                             resp.put("operacao", operacao);
                             resp.put("status", true);
                             resp.put("info", "Usuário criado com sucesso.");
@@ -106,13 +111,11 @@ public class Server extends Thread {
                         if (dados != null && Objects.equals(dados.get("senha"), senha)) {
                             String token = UUID.randomUUID().toString();
                             tokens.put(token, cpf);
-                            System.out.println(ts() + " [INFO] Login ok cpf=" + cpf + " token=" + token);
                             resp.put("operacao", operacao);
                             resp.put("token", token);
                             resp.put("status", true);
                             resp.put("info", "Login bem-sucedido.");
                         } else {
-                            System.out.println(ts() + " [INFO] Login falhou cpf=" + cpf);
                             resp.put("operacao", operacao);
                             resp.put("status", false);
                             resp.put("info", "Ocorreu um erro ao realizar login.");
@@ -129,8 +132,6 @@ public class Server extends Thread {
                             double saldo = 0.0;
                             try { saldo = Double.parseDouble(dados.getOrDefault("saldo", "0.0")); } catch (Exception ignore) {}
                             usuario.put("saldo", saldo);
-
-                            System.out.println(ts() + " [INFO] Ler usuario cpf=" + cpf + " -> " + usuario);
                             resp.put("operacao", operacao);
                             resp.put("status", true);
                             resp.put("info", "Dados do usuário recuperados com sucesso.");
@@ -147,9 +148,6 @@ public class Server extends Thread {
                         Map<String, String> dados = cpf != null ? usuarios.get(cpf) : null;
                         Map<String, Object> usuarioReq = (Map<String, Object>) req.get("usuario");
                         if (dados != null && usuarioReq != null) {
-                            // Loga dados antigos
-                            System.out.println(ts() + " [INFO] Atualização - cpf: " + cpf + " | Antes: " + dados);
-
                             if (usuarioReq.containsKey("nome")) {
                                 String n = ((String) usuarioReq.get("nome")).trim();
                                 if (!n.isBlank()) dados.put("nome", n);
@@ -158,10 +156,6 @@ public class Server extends Thread {
                                 String s = ((String) usuarioReq.get("senha")).trim();
                                 if (!s.isBlank()) dados.put("senha", s);
                             }
-
-                            // Loga dados novos
-                            System.out.println(ts() + " [INFO] Atualização - cpf: " + cpf + " | Depois: " + dados);
-
                             resp.put("operacao", operacao);
                             resp.put("status", true);
                             resp.put("info", "Usuário atualizado com sucesso.");
@@ -175,7 +169,6 @@ public class Server extends Thread {
                         String token = ((String) req.get("token"));
                         String cpf = tokens.get(token);
                         if (cpf != null && usuarios.containsKey(cpf)) {
-                            System.out.println(ts() + " [INFO] Deletando usuario cpf=" + cpf);
                             usuarios.remove(cpf);
                             tokens.values().removeIf(v -> Objects.equals(v, cpf));
                             resp.put("operacao", operacao);
@@ -190,9 +183,7 @@ public class Server extends Thread {
                     } else if ("usuario_logout".equals(operacao)) {
                         String token = ((String) req.get("token"));
                         if (token != null && tokens.containsKey(token)) {
-                            String cpf = tokens.get(token);
                             tokens.remove(token);
-                            System.out.println(ts() + " [INFO] Logout token=" + token + " cpf=" + cpf);
                             resp.put("operacao", operacao);
                             resp.put("status", true);
                             resp.put("info", "Logout realizado com sucesso.");
@@ -202,7 +193,73 @@ public class Server extends Thread {
                             resp.put("info", "Ocorreu um erro ao realizar logout.");
                         }
 
-                    } else {
+                    } else if ("depositar".equals(operacao)) {
+                        String token = ((String) req.get("token"));
+                        Double valor = null;
+                        if (req.get("valor_enviado") instanceof Number) {
+                            valor = ((Number) req.get("valor_enviado")).doubleValue();
+                        } else {
+                            valor = Double.parseDouble(req.get("valor_enviado").toString());
+                        }
+                        String cpf = tokens.get(token);
+                        if (cpf != null && usuarios.containsKey(cpf) && valor != null && valor > 0) {
+                            Map<String, String> dados = usuarios.get(cpf);
+                            double saldoAntigo = Double.parseDouble(dados.getOrDefault("saldo", "0.0"));
+                            double saldoNovo = saldoAntigo + valor;
+                            dados.put("saldo", String.valueOf(saldoNovo));
+                            // Adiciona transação tipo depósito (enviador=recebedor=usuário)
+                            Map<String, Object> t = new LinkedHashMap<>();
+                            int id = idTransacao.getAndIncrement();
+                            t.put("id", id);
+                            t.put("valor_enviado", valor);
+                            t.put("usuario_enviador", Map.of("nome", dados.get("nome"), "cpf", cpf));
+                            t.put("usuario_recebedor", Map.of("nome", dados.get("nome"), "cpf", cpf));
+                            t.put("criado_em", isoNow());
+                            t.put("atualizado_em", isoNow());
+                            transacoes.computeIfAbsent(cpf, k -> new ArrayList<>()).add(t);
+                            resp.put("operacao", operacao);
+                            resp.put("status", true);
+                            resp.put("info", "Deposito realizado com sucesso.");
+                        } else {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Erro ao depositar.");
+                        }
+
+                    } else if ("transacao_ler".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        String cpf = tokens.get(token);
+                        String dIni = (String) req.get("data_inicial");
+                        String dFim = (String) req.get("data_final");
+                        List<Map<String, Object>> extrato = new ArrayList<>();
+                        try {
+                            LocalDateTime ini = LocalDateTime.parse(dIni.replace("Z", ""));
+                            LocalDateTime fim = LocalDateTime.parse(dFim.replace("Z", ""));
+                            if (cpf != null && transacoes.containsKey(cpf)) {
+                                List<Map<String, Object>> todas = transacoes.getOrDefault(cpf, Collections.emptyList());
+                                extrato = todas.stream()
+                                        .filter(t -> {
+                                            String dt = (String) t.get("criado_em");
+                                            LocalDateTime td = LocalDateTime.parse(dt.replace("Z", ""));
+                                            return !td.isBefore(ini) && !td.isAfter(fim);
+                                        })
+                                        .collect(Collectors.toList());
+                                resp.put("operacao", operacao);
+                                resp.put("status", true);
+                                resp.put("info", "Transações recuperadas com sucesso.");
+                                resp.put("transacoes", extrato);
+                            } else {
+                                resp.put("operacao", operacao);
+                                resp.put("status", false);
+                                resp.put("info", "Erro ao ler transações.");
+                            }
+                        } catch (Exception ex) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Erro ao ler transações.");
+                        }
+                    }
+                    else {
                         resp.put("operacao", operacao);
                         resp.put("status", false);
                         resp.put("info", "Operação desconhecida.");
