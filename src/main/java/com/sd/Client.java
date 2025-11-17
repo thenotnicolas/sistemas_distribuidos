@@ -2,6 +2,8 @@ package com.sd;
 
 import java.io.*;
 import java.net.*;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
@@ -9,6 +11,7 @@ import validador.Validator;
 public class Client {
     private static String token = "";
     private static final ObjectMapper mapper = new ObjectMapper();
+    private static final DateTimeFormatter dtFormat = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'");
 
     public static void main(String[] args) throws IOException {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
@@ -55,6 +58,8 @@ public class Client {
                 System.out.println("4 - Atualizar dados");
                 System.out.println("5 - Deletar conta");
                 System.out.println("6 - Logout");
+                System.out.println("7 - Depositar dinheiro");
+                System.out.println("8 - Solicitar extrato");
                 System.out.println("0 - Sair");
                 System.out.print("Escolha: ");
                 String op = br.readLine();
@@ -94,6 +99,21 @@ public class Client {
                 } else if ("6".equals(op)) {
                     mensagem.put("operacao", "usuario_logout");
                     mensagem.put("token", token);
+                } else if ("7".equals(op)) {
+                    mensagem.put("operacao", "depositar");
+                    mensagem.put("token", token);
+                    System.out.print("Valor a depositar: ");
+                    double val = Double.parseDouble(br.readLine());
+                    mensagem.put("valor_enviado", val);
+                } else if ("8".equals(op)) {
+                    mensagem.put("operacao", "transacao_ler");
+                    mensagem.put("token", token);
+                    System.out.print("Data inicial (ex: 2025-11-01T00:00:00Z): ");
+                    String dIni = br.readLine();
+                    System.out.print("Data final (ex: 2025-11-17T23:59:59Z): ");
+                    String dFim = br.readLine();
+                    mensagem.put("data_inicial", dIni);
+                    mensagem.put("data_final", dFim);
                 } else if ("0".equals(op)) {
                     System.out.println("Cliente finalizado.");
                     break;
@@ -102,20 +122,17 @@ public class Client {
                     continue;
                 }
 
-                // NÃO ENVIAR se a validação falhar
+                // Validação do protocolo antes de enviar
                 String jsonEnvio = mapper.writeValueAsString(mensagem);
                 try {
                     Validator.validateClient(jsonEnvio);
                 } catch (Exception e) {
                     System.out.println("Entrada inválida: " + e.getMessage());
-                    // Volta ao menu sem enviar nada
                     continue;
                 }
 
-                // Envia somente se válido
                 out.println(jsonEnvio);
 
-                // Ler resposta (tratar null/"null" e conexão reset)
                 String respostaServer;
                 try {
                     respostaServer = in.readLine();
@@ -138,7 +155,6 @@ public class Client {
 
                 System.out.println("Resposta: " + respostaServer);
 
-                // Atualizar token conforme respostas
                 try {
                     Map<String, Object> respMap = mapper.readValue(respostaServer, Map.class);
                     if ("usuario_login".equals(respMap.get("operacao"))
@@ -150,8 +166,18 @@ public class Client {
                             && Boolean.TRUE.equals(respMap.get("status"))) {
                         token = "";
                     }
-                } catch (Exception ignore) {
-                }
+                    if ("transacao_ler".equals(respMap.get("operacao")) && respMap.containsKey("transacoes")) {
+                        List<Map<String, Object>> transacoes = (List<Map<String, Object>>) respMap.get("transacoes");
+                        System.out.println("Extrato:");
+                        for (Map<String, Object> t : transacoes) {
+                            System.out.println("ID: " + t.get("id") +
+                                               " | Valor: " + t.get("valor_enviado") +
+                                               " | De: " + ((Map)t.get("usuario_enviador")).get("nome") +
+                                               " | Para: " + ((Map)t.get("usuario_recebedor")).get("nome") +
+                                               " | Data: " + t.get("criado_em"));
+                        }
+                    }
+                } catch (Exception ignore) {}
             }
         }
     }
