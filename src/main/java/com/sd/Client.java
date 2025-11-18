@@ -64,6 +64,14 @@ public class Client {
                 System.out.print("Escolha: ");
                 String op = br.readLine();
 
+                // Verificação de login para ações que exigem token
+                if (("3 4 5 6 7 8").contains(op)) {
+                    if (token == null || token.isBlank()) {
+                        System.out.println("Você precisa estar logado para realizar essa ação.");
+                        continue;
+                    }
+                }
+
                 Map<String, Object> mensagem = new LinkedHashMap<>();
                 if ("1".equals(op)) {
                     mensagem.put("operacao", "usuario_criar");
@@ -103,7 +111,14 @@ public class Client {
                     mensagem.put("operacao", "depositar");
                     mensagem.put("token", token);
                     System.out.print("Valor a depositar: ");
-                    double val = Double.parseDouble(br.readLine());
+                    String valorStr = br.readLine().replace(",",".");
+                    double val;
+                    try {
+                        val = Double.parseDouble(valorStr);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Formato inválido! Use ponto como separador decimal, ex: 52.30");
+                        continue;
+                    }
                     mensagem.put("valor_enviado", val);
                 } else if ("8".equals(op)) {
                     mensagem.put("operacao", "transacao_ler");
@@ -122,7 +137,6 @@ public class Client {
                     continue;
                 }
 
-                // Validação do protocolo antes de enviar
                 String jsonEnvio = mapper.writeValueAsString(mensagem);
                 try {
                     Validator.validateClient(jsonEnvio);
@@ -130,9 +144,7 @@ public class Client {
                     System.out.println("Entrada inválida: " + e.getMessage());
                     continue;
                 }
-
                 out.println(jsonEnvio);
-
                 String respostaServer;
                 try {
                     respostaServer = in.readLine();
@@ -140,21 +152,17 @@ public class Client {
                     System.out.println("Conexão encerrada pelo servidor: " + se.getMessage());
                     break;
                 }
-
                 if (respostaServer == null || "null".equals(respostaServer)) {
                     System.out.println("Servidor encerrou a conexão (mensagem inválida/protocolo). Reinicie o client.");
                     break;
                 }
-
                 try {
                     Validator.validateServer(respostaServer);
                 } catch (Exception e) {
                     System.out.println("Resposta inválida do servidor: " + e.getMessage());
                     break;
                 }
-
                 System.out.println("Resposta: " + respostaServer);
-
                 try {
                     Map<String, Object> respMap = mapper.readValue(respostaServer, Map.class);
                     if ("usuario_login".equals(respMap.get("operacao"))
