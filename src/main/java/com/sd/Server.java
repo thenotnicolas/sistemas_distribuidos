@@ -240,6 +240,85 @@ public class Server extends Thread {
                                 resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao depositar.");
                             }
                         }
+                    } else if ("transacao_criar".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            String cpfEnviador = selectCpfByToken(conn, token);
+                            String cpfDestino = ((String) req.get("cpf_destino")).trim();
+                            Double valor = null;
+                            if (req.get("valor") instanceof Number) {
+                                valor = ((Number) req.get("valor")).doubleValue();
+                            } else {
+                                valor = Double.parseDouble(req.get("valor").toString());
+                            }
+                            
+                            if (cpfEnviador == null) {
+                                resp.put("operacao", operacao);
+                                resp.put("status", false);
+                                resp.put("info", "Erro ao criar transação.");
+                            } else if (valor == null || valor <= 0) {
+                                resp.put("operacao", operacao);
+                                resp.put("status", false);
+                                resp.put("info", "Erro ao criar transação.");
+                            } else {
+                                // Verifica se CPF destino existe
+                                PreparedStatement stDest = conn.prepareStatement("SELECT cpf FROM usuarios WHERE cpf = ?");
+                                stDest.setString(1, cpfDestino);
+                                ResultSet rsDest = stDest.executeQuery();
+                                if (!rsDest.next()) {
+                                    resp.put("operacao", operacao);
+                                    resp.put("status", false);
+                                    resp.put("info", "Erro ao criar transação.");
+                                } else {
+                                    // Verifica saldo do enviador
+                                    PreparedStatement stSaldo = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?");
+                                    stSaldo.setString(1, cpfEnviador);
+                                    ResultSet rsSaldo = stSaldo.executeQuery();
+                                    if (rsSaldo.next()) {
+                                        double saldoAtual = rsSaldo.getDouble("saldo");
+                                        if (saldoAtual < valor) {
+                                            resp.put("operacao", operacao);
+                                            resp.put("status", false);
+                                            resp.put("info", "Erro ao criar transação.");
+                                        } else {
+                                            // Desconta do enviador
+                                            PreparedStatement stDebito = conn.prepareStatement("UPDATE usuarios SET saldo = saldo - ? WHERE cpf = ?");
+                                            stDebito.setDouble(1, valor);
+                                            stDebito.setString(2, cpfEnviador);
+                                            stDebito.execute();
+                                            
+                                            // Adiciona ao recebedor
+                                            PreparedStatement stCredito = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
+                                            stCredito.setDouble(1, valor);
+                                            stCredito.setString(2, cpfDestino);
+                                            stCredito.execute();
+                                            
+                                            // Cria registro da transação
+                                            PreparedStatement stTrans = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
+                                            stTrans.setDouble(1, valor);
+                                            stTrans.setString(2, cpfEnviador);
+                                            stTrans.setString(3, cpfDestino);
+                                            String now = isoNow();
+                                            stTrans.setString(4, now);
+                                            stTrans.setString(5, now);
+                                            stTrans.execute();
+                                            
+                                            resp.put("operacao", operacao);
+                                            resp.put("status", true);
+                                            resp.put("info", "Transação realizada com sucesso.");
+                                        }
+                                    } else {
+                                        resp.put("operacao", operacao);
+                                        resp.put("status", false);
+                                        resp.put("info", "Erro ao criar transação.");
+                                    }
+                                }
+                            }
+                        }
                     } else if ("transacao_ler".equals(operacao)) {
                         String token = (String) req.get("token");
                         if (token == null || token.isBlank()) {
