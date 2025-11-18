@@ -111,8 +111,10 @@ public class Client {
                 } else if ("7".equals(op)) {
                     mensagem.put("operacao", "depositar");
                     mensagem.put("token", token);
+                    System.out.print("CPF de destino (formato 000.000.000-00): ");
+                    mensagem.put("cpf_destino", br.readLine()); // pega CPF de destino
                     System.out.print("Valor a depositar: ");
-                    String valorStr = br.readLine().replace(",",".");
+                    String valorStr = br.readLine().replace(".", ".");
                     double val;
                     try {
                         val = Double.parseDouble(valorStr);
@@ -136,7 +138,7 @@ public class Client {
                     System.out.print("CPF de destino (formato 000.000.000-00): ");
                     mensagem.put("cpf_destino", br.readLine());
                     System.out.print("Valor a transferir: ");
-                    String valorStr = br.readLine().replace(",",".");
+                    String valorStr = br.readLine().replace(",", ".");
                     double val;
                     try {
                         val = Double.parseDouble(valorStr);
