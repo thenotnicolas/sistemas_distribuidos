@@ -60,12 +60,13 @@ public class Client {
                 System.out.println("6 - Logout");
                 System.out.println("7 - Depositar dinheiro");
                 System.out.println("8 - Solicitar extrato");
+                System.out.println("9 - Transferir para outra conta");
                 System.out.println("0 - Sair");
                 System.out.print("Escolha: ");
                 String op = br.readLine();
 
                 // Verificação de login para ações que exigem token
-                if (("3 4 5 6 7 8").contains(op)) {
+                if (("3 4 5 6 7 8 9").contains(op)) {
                     if (token == null || token.isBlank()) {
                         System.out.println("Você precisa estar logado para realizar essa ação.");
                         continue;
@@ -129,6 +130,21 @@ public class Client {
                     String dFim = br.readLine();
                     mensagem.put("data_inicial", dIni);
                     mensagem.put("data_final", dFim);
+                } else if ("9".equals(op)) {
+                    mensagem.put("operacao", "transacao_criar");
+                    mensagem.put("token", token);
+                    System.out.print("CPF de destino (formato 000.000.000-00): ");
+                    mensagem.put("cpf_destino", br.readLine());
+                    System.out.print("Valor a transferir: ");
+                    String valorStr = br.readLine().replace(",",".");
+                    double val;
+                    try {
+                        val = Double.parseDouble(valorStr);
+                    } catch (NumberFormatException e) {
+                        System.out.println("Formato inválido! Use ponto como separador decimal, ex: 52.30");
+                        continue;
+                    }
+                    mensagem.put("valor", val);
                 } else if ("0".equals(op)) {
                     System.out.println("Cliente finalizado.");
                     break;
