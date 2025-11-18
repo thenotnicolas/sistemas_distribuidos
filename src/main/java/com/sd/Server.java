@@ -6,9 +6,6 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
 
@@ -88,159 +85,9 @@ public class Server extends Thread {
                         resp.put("operacao", "conectar");
                         resp.put("status", true);
                         resp.put("info", "Servidor conectado com sucesso.");
-                    } else if ("usuario_criar".equals(operacao)) {
-                        String cpf = ((String) req.get("cpf")).trim();
-                        try (PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ?")) {
-                            st.setString(1, cpf);
-                            ResultSet rs = st.executeQuery();
-                            if (!rs.next()) {
-                                PreparedStatement ist = conn.prepareStatement("INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)");
-                                ist.setString(1, cpf);
-                                ist.setString(2, ((String) req.get("nome")).trim());
-                                ist.setString(3, ((String) req.get("senha")).trim());
-                                ist.execute();
-                                resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Usuário criado com sucesso.");
-                            } else {
-                                resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Ocorreu um erro ao criar usuário.");
-                            }
-                        }
-                    } else if ("usuario_login".equals(operacao)) {
-                        String cpf = ((String) req.get("cpf")).trim();
-                        String senha = ((String) req.get("senha")).trim();
-                        try (PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ? AND senha = ?")) {
-                            st.setString(1, cpf); st.setString(2, senha);
-                            ResultSet rs = st.executeQuery();
-                            if(rs.next()) {
-                                String token = UUID.randomUUID().toString();
-                                PreparedStatement stt = conn.prepareStatement("INSERT INTO tokens (token, cpf) VALUES (?, ?)");
-                                stt.setString(1, token);
-                                stt.setString(2, cpf);
-                                stt.execute();
-                                resp.put("operacao", operacao);
-                                resp.put("token", token);
-                                resp.put("status", true);
-                                resp.put("info", "Login bem-sucedido.");
-                            } else {
-                                resp.put("operacao", operacao);
-                                resp.put("status", false);
-                                resp.put("info", "Ocorreu um erro ao realizar login.");
-                            }
-                        }
-                    } else if ("usuario_ler".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            String cpf = selectCpfByToken(conn, token);
-                            if(cpf==null) {resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao ler dados do usuário.");}
-                            else {
-                                try (PreparedStatement st = conn.prepareStatement("SELECT nome, saldo FROM usuarios WHERE cpf = ?")) {
-                                    st.setString(1, cpf);
-                                    ResultSet rs = st.executeQuery();
-                                    if (rs.next()) {
-                                        Map<String, Object> usuario = new LinkedHashMap<>();
-                                        usuario.put("cpf", cpf);
-                                        usuario.put("nome", rs.getString("nome"));
-                                        usuario.put("saldo", rs.getDouble("saldo"));
-                                        resp.put("operacao", operacao);
-                                        resp.put("status", true);
-                                        resp.put("info", "Dados do usuário recuperados com sucesso.");
-                                        resp.put("usuario", usuario);
-                                    } else {
-                                        resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao ler dados do usuário.");
-                                    }
-                                }
-                            }
-                        }
-                    } else if ("usuario_atualizar".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            String cpf = selectCpfByToken(conn, token);
-                            Map<String, Object> usuarioReq = (Map<String, Object>) req.get("usuario");
-                            if (cpf != null && usuarioReq != null && (!usuarioReq.isEmpty())) {
-                                if (usuarioReq.containsKey("nome")) {
-                                    PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET nome = ? WHERE cpf = ?");
-                                    st.setString(1, ((String) usuarioReq.get("nome")).trim());
-                                    st.setString(2, cpf); st.execute();
-                                }
-                                if (usuarioReq.containsKey("senha")) {
-                                    PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET senha = ? WHERE cpf = ?");
-                                    st.setString(1, ((String) usuarioReq.get("senha")).trim());
-                                    st.setString(2, cpf); st.execute();
-                                }
-                                resp.put("operacao", operacao);resp.put("status", true);resp.put("info", "Usuário atualizado com sucesso.");
-                            } else {
-                                resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao atualizar usuário.");
-                            }
-                        }
-                    } else if ("usuario_deletar".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            String cpf = selectCpfByToken(conn, token);
-                            if (cpf != null) {
-                                PreparedStatement st = conn.prepareStatement("DELETE FROM usuarios WHERE cpf = ?");
-                                st.setString(1, cpf); st.execute();
-                                PreparedStatement st2 = conn.prepareStatement("DELETE FROM tokens WHERE cpf = ?");
-                                st2.setString(1, cpf); st2.execute();
-                                resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Usuário deletado com sucesso.");
-                            } else {
-                                resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao deletar usuário.");
-                            }
-                        }
-                    } else if ("usuario_logout".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            try (PreparedStatement st = conn.prepareStatement("DELETE FROM tokens WHERE token = ?")) {
-                                st.setString(1, token);
-                                st.execute();
-                            }
-                            resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Logout realizado com sucesso.");
-                        }
-                    } else if ("depositar".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            String cpf = selectCpfByToken(conn, token);
-                            Double valor = null;
-                            if (req.get("valor_enviado") instanceof Number) {
-                                valor = ((Number) req.get("valor_enviado")).doubleValue();
-                            } else {
-                                valor = Double.parseDouble(req.get("valor_enviado").toString());
-                            }
-                            if (cpf != null && valor != null && valor > 0) {
-                                PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
-                                st.setDouble(1, valor); st.setString(2, cpf); st.execute();
-                                // Deposito = transação consigo mesmo
-                                PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
-                                tstmt.setDouble(1, valor);
-                                tstmt.setString(2, cpf);
-                                tstmt.setString(3, cpf);
-                                String now = isoNow();
-                                tstmt.setString(4, now); tstmt.setString(5, now);
-                                tstmt.execute();
-                                resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Deposito realizado com sucesso.");
-                            } else {
-                                resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao depositar.");
-                            }
-                        }
-                    } else if ("transacao_criar".equals(operacao)) {
+                    } ... 
+                    // --- continua igual ---
+                    else if ("depositar".equals(operacao)) {
                         String token = (String) req.get("token");
                         if (token == null || token.isBlank()) {
                             resp.put("operacao", operacao);
@@ -248,33 +95,26 @@ public class Server extends Thread {
                             resp.put("info", "Você precisa estar logado para realizar essa ação.");
                         } else {
                             String cpfEnviador = selectCpfByToken(conn, token);
-                            String cpfDestino = ((String) req.get("cpf_destino")).trim();
+                            String cpfDestino = req.containsKey("cpf_destino") ? ((String) req.get("cpf_destino")).trim() : cpfEnviador; // se não enviar, deposita para si mesmo
                             Double valor = null;
-                            if (req.get("valor") instanceof Number) {
-                                valor = ((Number) req.get("valor")).doubleValue();
+                            if (req.get("valor_enviado") instanceof Number) {
+                                valor = ((Number) req.get("valor_enviado")).doubleValue();
                             } else {
-                                valor = Double.parseDouble(req.get("valor").toString());
+                                valor = Double.parseDouble(req.get("valor_enviado").toString());
                             }
-                            
-                            if (cpfEnviador == null) {
+                            if (cpfEnviador == null || valor == null || valor <= 0) {
                                 resp.put("operacao", operacao);
                                 resp.put("status", false);
-                                resp.put("info", "Erro ao criar transação.");
-                            } else if (valor == null || valor <= 0) {
-                                resp.put("operacao", operacao);
-                                resp.put("status", false);
-                                resp.put("info", "Erro ao criar transação.");
+                                resp.put("info", "Erro ao depositar.");
                             } else {
-                                // Verifica se CPF destino existe
                                 PreparedStatement stDest = conn.prepareStatement("SELECT cpf FROM usuarios WHERE cpf = ?");
                                 stDest.setString(1, cpfDestino);
                                 ResultSet rsDest = stDest.executeQuery();
                                 if (!rsDest.next()) {
                                     resp.put("operacao", operacao);
                                     resp.put("status", false);
-                                    resp.put("info", "Erro ao criar transação.");
-                                } else {
-                                    // Verifica saldo do enviador
+                                    resp.put("info", "CPF de destino não encontrado.");
+                                } else if (!cpfEnviador.equals(cpfDestino)) {
                                     PreparedStatement stSaldo = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?");
                                     stSaldo.setString(1, cpfEnviador);
                                     ResultSet rsSaldo = stSaldo.executeQuery();
@@ -283,82 +123,46 @@ public class Server extends Thread {
                                         if (saldoAtual < valor) {
                                             resp.put("operacao", operacao);
                                             resp.put("status", false);
-                                            resp.put("info", "Erro ao criar transação.");
+                                            resp.put("info", "Saldo insuficiente.");
                                         } else {
-                                            // Desconta do enviador
                                             PreparedStatement stDebito = conn.prepareStatement("UPDATE usuarios SET saldo = saldo - ? WHERE cpf = ?");
                                             stDebito.setDouble(1, valor);
                                             stDebito.setString(2, cpfEnviador);
                                             stDebito.execute();
-                                            
-                                            // Adiciona ao recebedor
+
                                             PreparedStatement stCredito = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
                                             stCredito.setDouble(1, valor);
                                             stCredito.setString(2, cpfDestino);
                                             stCredito.execute();
-                                            
-                                            // Cria registro da transação
-                                            PreparedStatement stTrans = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
-                                            stTrans.setDouble(1, valor);
-                                            stTrans.setString(2, cpfEnviador);
-                                            stTrans.setString(3, cpfDestino);
+
+                                            PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
+                                            tstmt.setDouble(1, valor);
+                                            tstmt.setString(2, cpfEnviador);
+                                            tstmt.setString(3, cpfDestino);
                                             String now = isoNow();
-                                            stTrans.setString(4, now);
-                                            stTrans.setString(5, now);
-                                            stTrans.execute();
-                                            
-                                            resp.put("operacao", operacao);
-                                            resp.put("status", true);
-                                            resp.put("info", "Transação realizada com sucesso.");
+                                            tstmt.setString(4, now); tstmt.setString(5, now);
+                                            tstmt.execute();
+                                            resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Deposito realizado com sucesso.");
                                         }
                                     } else {
-                                        resp.put("operacao", operacao);
-                                        resp.put("status", false);
-                                        resp.put("info", "Erro ao criar transação.");
+                                        resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao consultar saldo.");
                                     }
+                                } else {
+                                    PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
+                                    st.setDouble(1, valor); st.setString(2, cpfEnviador); st.execute();
+                                    PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
+                                    tstmt.setDouble(1, valor);
+                                    tstmt.setString(2, cpfEnviador);
+                                    tstmt.setString(3, cpfEnviador);
+                                    String now = isoNow();
+                                    tstmt.setString(4, now); tstmt.setString(5, now);
+                                    tstmt.execute();
+                                    resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Deposito realizado com sucesso.");
                                 }
                             }
                         }
-                    } else if ("transacao_ler".equals(operacao)) {
-                        String token = (String) req.get("token");
-                        if (token == null || token.isBlank()) {
-                            resp.put("operacao", operacao);
-                            resp.put("status", false);
-                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
-                        } else {
-                            String cpf = selectCpfByToken(conn, token);
-                            String dIni = (String) req.get("data_inicial");
-                            String dFim = (String) req.get("data_final");
-                            List<Map<String, Object>> extrato = new ArrayList<>();
-                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE (cpf_enviador = ? OR cpf_recebedor = ?) AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
-                            try (PreparedStatement st = conn.prepareStatement(query)) {
-                            st.setString(1, cpf);
-                            st.setString(2, cpf);
-                            st.setString(3, dIni);      
-                                ResultSet rs = st.executeQuery();
-                                while (rs.next()) {
-                                    Map<String, Object> t = new LinkedHashMap<>();
-                                    t.put("id", rs.getInt("id"));
-                                    t.put("valor_enviado", rs.getDouble("valor_enviado"));
-                                    t.put("usuario_enviador", Map.of("nome", getNomeByCpf(conn, rs.getString("cpf_enviador")), "cpf", rs.getString("cpf_enviador")));
-                                    t.put("usuario_recebedor", Map.of("nome", getNomeByCpf(conn, rs.getString("cpf_recebedor")), "cpf", rs.getString("cpf_recebedor")));
-                                    t.put("criado_em", rs.getString("criado_em"));
-                                    t.put("atualizado_em", rs.getString("atualizado_em"));
-                                    extrato.add(t);
-                                }
-                                resp.put("operacao", operacao);
-                                resp.put("status", true);
-                                resp.put("info", "Transações recuperadas com sucesso.");
-                                resp.put("transacoes", extrato);
-                            } catch(Exception ex){
-                                resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao ler transações.");
-                            }
-                        }
-                    } else {
-                        resp.put("operacao", operacao);
-                        resp.put("status", false);
-                        resp.put("info", "Operação desconhecida.");
                     }
+                    // --- resto igual ---
                     String jsonResp = mapper.writeValueAsString(resp);
                     try {
                         Validator.validateServer(jsonResp);
