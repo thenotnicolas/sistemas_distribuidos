@@ -8,7 +8,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import java.util.UUID;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
 
@@ -330,11 +330,11 @@ public class Server extends Thread {
                             String dIni = (String) req.get("data_inicial");
                             String dFim = (String) req.get("data_final");
                             List<Map<String, Object>> extrato = new ArrayList<>();
-                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE cpf_enviador = ? AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
+                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE (cpf_enviador = ? OR cpf_recebedor = ?) AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
                             try (PreparedStatement st = conn.prepareStatement(query)) {
-                                st.setString(1, cpf);
-                                st.setString(2, dIni);
-                                st.setString(3, dFim);
+                            st.setString(1, cpf);
+                            st.setString(2, cpf);
+                            st.setString(3, dIni);      
                                 ResultSet rs = st.executeQuery();
                                 while (rs.next()) {
                                     Map<String, Object> t = new LinkedHashMap<>();
