@@ -51,7 +51,6 @@ public class Server extends Thread {
             BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
             Connection conn = DriverManager.getConnection(DB_URL)
         ) {
-            boolean conectado = false;
             String input;
             while (true) {
                 try {
@@ -73,18 +72,8 @@ public class Server extends Thread {
                     Map<String, Object> req = mapper.readValue(input, Map.class);
                     String operacao = (String) req.get("operacao");
                     Map<String, Object> resp = new LinkedHashMap<>();
-                    if (!conectado && !"conectar".equals(operacao)) {
-                        resp.put("operacao", operacao);
-                        resp.put("status", false);
-                        resp.put("info", "Erro, para receber uma operacao, a primeira operacao deve ser 'conectar'");
-                        String json = mapper.writeValueAsString(resp);
-                        try { Validator.validateServer(json); } catch (Exception e) { System.out.println(ts() + " [WARN] validateServer resp: " + e.getMessage()); }
-                        out.println(json);
-                        System.out.println(ts() + " [SEND] " + who + " <- " + json);
-                        continue;
-                    }
+                    
                     if ("conectar".equals(operacao)) {
-                        conectado = true;
                         resp.put("operacao", "conectar");
                         resp.put("status", true);
                         resp.put("info", "Servidor conectado com sucesso.");
@@ -251,11 +240,12 @@ public class Server extends Thread {
                             String dIni = (String) req.get("data_inicial");
                             String dFim = (String) req.get("data_final");
                             List<Map<String, Object>> extrato = new ArrayList<>();
-                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE cpf_enviador = ? AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
+                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE (cpf_enviador = ? OR cpf_recebedor = ?) AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
                             try (PreparedStatement st = conn.prepareStatement(query)) {
                                 st.setString(1, cpf);
-                                st.setString(2, dIni);
-                                st.setString(3, dFim);
+                                st.setString(2, cpf);
+                                st.setString(3, dIni);
+                                st.setString(4, dFim);
                                 ResultSet rs = st.executeQuery();
                                 while (rs.next()) {
                                     Map<String, Object> t = new LinkedHashMap<>();
