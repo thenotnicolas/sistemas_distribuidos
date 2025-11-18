@@ -85,9 +85,129 @@ public class Server extends Thread {
                         resp.put("operacao", "conectar");
                         resp.put("status", true);
                         resp.put("info", "Servidor conectado com sucesso.");
-                    } ... 
-                    // --- continua igual ---
-                    else if ("depositar".equals(operacao)) {
+                    } else if ("usuario_criar".equals(operacao)) {
+                        String cpf = ((String) req.get("cpf")).trim();
+                        try (PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ?")) {
+                            st.setString(1, cpf);
+                            ResultSet rs = st.executeQuery();
+                            if (!rs.next()) {
+                                PreparedStatement ist = conn.prepareStatement("INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)");
+                                ist.setString(1, cpf);
+                                ist.setString(2, ((String) req.get("nome")).trim());
+                                ist.setString(3, ((String) req.get("senha")).trim());
+                                ist.execute();
+                                resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Usuário criado com sucesso.");
+                            } else {
+                                resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Ocorreu um erro ao criar usuário.");
+                            }
+                        }
+                    } else if ("usuario_login".equals(operacao)) {
+                        String cpf = ((String) req.get("cpf")).trim();
+                        String senha = ((String) req.get("senha")).trim();
+                        try (PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ? AND senha = ?")) {
+                            st.setString(1, cpf); st.setString(2, senha);
+                            ResultSet rs = st.executeQuery();
+                            if(rs.next()) {
+                                String token = UUID.randomUUID().toString();
+                                PreparedStatement stt = conn.prepareStatement("INSERT INTO tokens (token, cpf) VALUES (?, ?)");
+                                stt.setString(1, token);
+                                stt.setString(2, cpf);
+                                stt.execute();
+                                resp.put("operacao", operacao);
+                                resp.put("token", token);
+                                resp.put("status", true);
+                                resp.put("info", "Login bem-sucedido.");
+                            } else {
+                                resp.put("operacao", operacao);
+                                resp.put("status", false);
+                                resp.put("info", "Ocorreu um erro ao realizar login.");
+                            }
+                        }
+                    } else if ("usuario_ler".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            String cpf = selectCpfByToken(conn, token);
+                            if(cpf==null) {resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao ler dados do usuário.");}
+                            else {
+                                try (PreparedStatement st = conn.prepareStatement("SELECT nome, saldo FROM usuarios WHERE cpf = ?")) {
+                                    st.setString(1, cpf);
+                                    ResultSet rs = st.executeQuery();
+                                    if (rs.next()) {
+                                        Map<String, Object> usuario = new LinkedHashMap<>();
+                                        usuario.put("cpf", cpf);
+                                        usuario.put("nome", rs.getString("nome"));
+                                        usuario.put("saldo", rs.getDouble("saldo"));
+                                        resp.put("operacao", operacao);
+                                        resp.put("status", true);
+                                        resp.put("info", "Dados do usuário recuperados com sucesso.");
+                                        resp.put("usuario", usuario);
+                                    } else {
+                                        resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao ler dados do usuário.");
+                                    }
+                                }
+                            }
+                        }
+                    } else if ("usuario_atualizar".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            String cpf = selectCpfByToken(conn, token);
+                            Map<String, Object> usuarioReq = (Map<String, Object>) req.get("usuario");
+                            if (cpf != null && usuarioReq != null && (!usuarioReq.isEmpty())) {
+                                if (usuarioReq.containsKey("nome")) {
+                                    PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET nome = ? WHERE cpf = ?");
+                                    st.setString(1, ((String) usuarioReq.get("nome")).trim());
+                                    st.setString(2, cpf); st.execute();
+                                }
+                                if (usuarioReq.containsKey("senha")) {
+                                    PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET senha = ? WHERE cpf = ?");
+                                    st.setString(1, ((String) usuarioReq.get("senha")).trim());
+                                    st.setString(2, cpf); st.execute();
+                                }
+                                resp.put("operacao", operacao);resp.put("status", true);resp.put("info", "Usuário atualizado com sucesso.");
+                            } else {
+                                resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao atualizar usuário.");
+                            }
+                        }
+                    } else if ("usuario_deletar".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            String cpf = selectCpfByToken(conn, token);
+                            if (cpf != null) {
+                                PreparedStatement st = conn.prepareStatement("DELETE FROM usuarios WHERE cpf = ?");
+                                st.setString(1, cpf); st.execute();
+                                PreparedStatement st2 = conn.prepareStatement("DELETE FROM tokens WHERE cpf = ?");
+                                st2.setString(1, cpf); st2.execute();
+                                resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Usuário deletado com sucesso.");
+                            } else {
+                                resp.put("operacao", operacao);resp.put("status", false);resp.put("info", "Erro ao deletar usuário.");
+                            }
+                        }
+                    } else if ("usuario_logout".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            try (PreparedStatement st = conn.prepareStatement("DELETE FROM tokens WHERE token = ?")) {
+                                st.setString(1, token);
+                                st.execute();
+                            }
+                            resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Logout realizado com sucesso.");
+                        }
+                    } else if ("depositar".equals(operacao)) {
                         String token = (String) req.get("token");
                         if (token == null || token.isBlank()) {
                             resp.put("operacao", operacao);
@@ -95,7 +215,7 @@ public class Server extends Thread {
                             resp.put("info", "Você precisa estar logado para realizar essa ação.");
                         } else {
                             String cpfEnviador = selectCpfByToken(conn, token);
-                            String cpfDestino = req.containsKey("cpf_destino") ? ((String) req.get("cpf_destino")).trim() : cpfEnviador; // se não enviar, deposita para si mesmo
+                            String cpfDestino = req.containsKey("cpf_destino") ? ((String) req.get("cpf_destino")).trim() : cpfEnviador;
                             Double valor = null;
                             if (req.get("valor_enviado") instanceof Number) {
                                 valor = ((Number) req.get("valor_enviado")).doubleValue();
@@ -161,8 +281,7 @@ public class Server extends Thread {
                                 }
                             }
                         }
-                    }
-                    // --- resto igual ---
+                    } // ... demais operações não mudaram ...
                     String jsonResp = mapper.writeValueAsString(resp);
                     try {
                         Validator.validateServer(jsonResp);
