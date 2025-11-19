@@ -6,9 +6,6 @@ import java.sql.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
-import java.util.UUID;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import validador.Validator;
 
@@ -27,7 +24,6 @@ public class Server extends Thread {
     private static String ts() { return "[" + LocalDateTime.now().format(TS) + "]"; }
     private static String isoNow() { return LocalDateTime.now().format(ISO); }
 
-    // Inicializa o banco com as tabelas
     public static void initDatabase() {
         String sqlUsuarios = "CREATE TABLE IF NOT EXISTS usuarios (cpf TEXT PRIMARY KEY, nome TEXT, senha TEXT, saldo REAL)";
         String sqlTransacoes = "CREATE TABLE IF NOT EXISTS transacoes (id INTEGER PRIMARY KEY AUTOINCREMENT, valor_enviado REAL, cpf_enviador TEXT, cpf_recebedor TEXT, criado_em TEXT, atualizado_em TEXT)";
@@ -72,7 +68,7 @@ public class Server extends Thread {
                     Map<String, Object> req = mapper.readValue(input, Map.class);
                     String operacao = (String) req.get("operacao");
                     Map<String, Object> resp = new LinkedHashMap<>();
-                    
+
                     if ("conectar".equals(operacao)) {
                         resp.put("operacao", "conectar");
                         resp.put("status", true);
@@ -216,7 +212,6 @@ public class Server extends Thread {
                             if (cpf != null && valor != null && valor > 0) {
                                 PreparedStatement st = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
                                 st.setDouble(1, valor); st.setString(2, cpf); st.execute();
-                                // Deposito = transação consigo mesmo
                                 PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
                                 tstmt.setDouble(1, valor);
                                 tstmt.setString(2, cpf);
@@ -227,6 +222,53 @@ public class Server extends Thread {
                                 resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Deposito realizado com sucesso.");
                             } else {
                                 resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao depositar.");
+                            }
+                        }
+                    } else if ("transacao_criar".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        String cpfDestino = (String) req.get("cpf_destino");
+                        Double valor = null;
+                        if (req.get("valor") instanceof Number)
+                            valor = ((Number) req.get("valor")).doubleValue();
+                        else
+                            valor = Double.parseDouble(req.get("valor").toString());
+
+                        if (token == null || token.isBlank() || cpfDestino == null || cpfDestino.isBlank() || valor == null || valor <= 0) {
+                            resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Dados inválidos.");
+                        } else {
+                            String cpfOrigem = selectCpfByToken(conn, token);
+                            try (PreparedStatement st = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?")) {
+                                st.setString(1, cpfDestino);
+                                ResultSet rs = st.executeQuery();
+                                if (!rs.next()) {
+                                    resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "CPF destino não existe.");
+                                } else {
+                                    PreparedStatement so = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?");
+                                    so.setString(1, cpfOrigem);
+                                    ResultSet ro = so.executeQuery();
+                                    if (!ro.next() || ro.getDouble("saldo") < valor) {
+                                        resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Saldo insuficiente.");
+                                    } else {
+                                        conn.setAutoCommit(false);
+                                        try {
+                                            PreparedStatement stmtSaida = conn.prepareStatement("UPDATE usuarios SET saldo = saldo - ? WHERE cpf = ?");
+                                            stmtSaida.setDouble(1, valor); stmtSaida.setString(2, cpfOrigem); stmtSaida.execute();
+                                            PreparedStatement stmtEntrada = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
+                                            stmtEntrada.setDouble(1, valor); stmtEntrada.setString(2, cpfDestino); stmtEntrada.execute();
+                                            PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
+                                            String now = isoNow();
+                                            tstmt.setDouble(1, valor); tstmt.setString(2, cpfOrigem); tstmt.setString(3, cpfDestino); tstmt.setString(4, now); tstmt.setString(5, now);
+                                            tstmt.execute();
+                                            conn.commit();
+                                            resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Transferência realizada com sucesso.");
+                                        } catch (Exception exc) {
+                                            conn.rollback();
+                                            resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao transferir.");
+                                        } finally {
+                                            conn.setAutoCommit(true);
+                                        }
+                                    }
+                                }
                             }
                         }
                     } else if ("transacao_ler".equals(operacao)) {
@@ -311,7 +353,6 @@ public class Server extends Thread {
         }
     }
 
-    // Funções auxiliares para tokens/cpf
     private static String selectCpfByToken(Connection conn, String token) throws SQLException {
         try (PreparedStatement st = conn.prepareStatement("SELECT cpf FROM tokens WHERE token = ?")) {
             st.setString(1, token);
