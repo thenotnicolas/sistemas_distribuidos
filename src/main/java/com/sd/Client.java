@@ -29,6 +29,29 @@ public class Client {
             out = new PrintWriter(socket.getOutputStream(), true);
             in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             System.out.println("[INFO] Conectado ao servidor em " + serverIP + ":" + serverPort);
+
+            // handshake conectar (protocolo oficial)
+            Map<String, Object> handshake = new LinkedHashMap<>();
+            handshake.put("operacao", "conectar");
+            String handshakeJson = mapper.writeValueAsString(handshake);
+            System.out.println("[HANDSHAKE] Enviando: " + handshakeJson);
+            out.println(handshakeJson);
+            String respostaHandshake = in.readLine();
+            System.out.println("[HANDSHAKE] Recebido: " + respostaHandshake);
+            try {
+                Validator.validateServer(respostaHandshake);
+                Map<String, Object> respMap = mapper.readValue(respostaHandshake, Map.class);
+                boolean status = (Boolean) respMap.getOrDefault("status", false);
+                if (!status) {
+                    String info = (String) respMap.getOrDefault("info", "");
+                    System.out.println("[ERRO] Falha ao conectar: " + info);
+                    return;
+                }
+            } catch (Exception eh) {
+                System.out.println("[ERRO] Handshake inválido: " + eh.getMessage());
+                return;
+            }
+
             while (true) {
                 exibirMenu();
                 System.out.print("Escolha uma opção: ");
