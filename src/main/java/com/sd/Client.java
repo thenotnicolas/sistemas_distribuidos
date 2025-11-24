@@ -45,11 +45,11 @@ public class Client {
                 if (!status) {
                     String info = (String) respMap.getOrDefault("info", "");
                     System.out.println("[ERRO] Falha ao conectar: " + info);
-                    return;
+                    System.out.println("[INFO] Tentando continuar mesmo com falha no handshake...");
                 }
             } catch (Exception eh) {
                 System.out.println("[ERRO] Handshake inválido: " + eh.getMessage());
-                return;
+                System.out.println("[INFO] Tentando continuar mesmo com falha no handshake...");
             }
 
             while (true) {
@@ -160,17 +160,20 @@ public class Client {
                     respostaServer = in.readLine();
                 } catch (IOException se) {
                     System.out.println("[ERRO] Conexão encerrada pelo servidor: " + se.getMessage());
-                    break;
+                    System.out.println("[INFO] Tentando reconectar... (pressione 0 para sair)");
+                    continue;
                 }
                 if (respostaServer == null || "null".equals(respostaServer)) {
-                    System.out.println("[ERRO] Servidor encerrou a conexão (mensagem inválida/protocolo). Reinicie o client.");
-                    break;
+                    System.out.println("[ERRO] Servidor encerrou a conexão (mensagem inválida/protocolo).");
+                    System.out.println("[INFO] Por favor, reinicie o cliente ou tente novamente.");
+                    continue;
                 }
                 try {
                     Validator.validateServer(respostaServer);
                 } catch (Exception e) {
                     System.out.println("[ERRO] Resposta inválida do servidor: " + e.getMessage());
-                    break;
+                    System.out.println("[INFO] Continuando execução...");
+                    continue;
                 }
                 System.out.println("[RECEBIDO] " + respostaServer);
                 try {
