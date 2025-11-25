@@ -77,17 +77,13 @@ public class Server extends Thread {
                         resp.put("operacao", "conectar");
                         resp.put("status", true);
                         resp.put("info", "Servidor conectado com sucesso.");
-
-                    // --- BLOCO DE CADASTRO RESTAURADO DO COMMIT e44446a ---
                     } else if ("usuario_criar".equals(operacao)) {
                         String cpf = ((String) req.get("cpf")).trim();
                         try (PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ?")) {
                             st.setString(1, cpf);
                             ResultSet rs = st.executeQuery();
                             if (!rs.next()) {
-                                PreparedStatement ist = conn.prepareStatement(
-                                        "INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)"
-                                );
+                                PreparedStatement ist = conn.prepareStatement("INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)");
                                 ist.setString(1, cpf);
                                 ist.setString(2, ((String) req.get("nome")).trim());
                                 ist.setString(3, ((String) req.get("senha")).trim());
@@ -97,8 +93,6 @@ public class Server extends Thread {
                                 resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Usuário já cadastrado.");
                             }
                         }
-
-                    // ----------------------------------------------------
                     } else if ("usuario_login".equals(operacao)) {
                         String cpf = ((String) req.get("cpf")).trim();
                         String senha = ((String) req.get("senha")).trim();
@@ -235,7 +229,54 @@ public class Server extends Thread {
                             }
                         }
                     } else if ("transacao_criar".equals(operacao)) {
-                        // ... igual ao atual ...
+                        String token = (String) req.get("token");
+                        String cpfDestino = (String) req.get("cpf_destino");
+                        Double valor = null;
+                        if (req.get("valor") instanceof Number)
+                            valor = ((Number) req.get("valor")).doubleValue();
+                        else
+                            valor = Double.parseDouble(req.get("valor").toString());
+
+                        if (token == null || token.isBlank() || cpfDestino == null || cpfDestino.isBlank() || valor == null || valor <= 0) {
+                            resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Dados inválidos.");
+                        } else {
+                            String cpfOrigem = selectCpfByToken(conn, token);
+                            try (PreparedStatement st = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?")) {
+                                st.setString(1, cpfDestino);
+                                ResultSet rs = st.executeQuery();
+                                if (!rs.next()) {
+                                    resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "CPF destino não existe.");
+                                } else {
+                                    PreparedStatement so = conn.prepareStatement("SELECT saldo FROM usuarios WHERE cpf = ?");
+                                    so.setString(1, cpfOrigem);
+                                    ResultSet ro = so.executeQuery();
+                                    if (!ro.next() || ro.getDouble("saldo") < valor) {
+                                        resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Saldo insuficiente.");
+                                    } else {
+                                        conn.setAutoCommit(false);
+                                        try {
+                                            PreparedStatement stmtSaida = conn.prepareStatement("UPDATE usuarios SET saldo = saldo - ? WHERE cpf = ?");
+                                            stmtSaida.setDouble(1, valor); stmtSaida.setString(2, cpfOrigem); stmtSaida.execute();
+                                            PreparedStatement stmtEntrada = conn.prepareStatement("UPDATE usuarios SET saldo = saldo + ? WHERE cpf = ?");
+                                            stmtEntrada.setDouble(1, valor); stmtEntrada.setString(2, cpfDestino); stmtEntrada.execute();
+                                            PreparedStatement tstmt = conn.prepareStatement("INSERT INTO transacoes (valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)");
+                                            String now = isoNow();
+                                            tstmt.setDouble(1, valor); tstmt.setString(2, cpfOrigem); tstmt.setString(3, cpfDestino); tstmt.setString(4, now); tstmt.setString(5, now);
+                                            tstmt.execute();
+                                            conn.commit();
+                                            resp.put("operacao", operacao); resp.put("status", true); resp.put("info", "Transferência realizada com sucesso.");
+                                        } catch (Exception exc) {
+                                            conn.rollback();
+                                            resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao transferir: " + exc.getMessage());
+                                        } finally {
+                                            conn.setAutoCommit(true);
+                                        }
+                                    }
+                                }
+                            } catch (Exception eTr) {
+                                resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao transferir: " + eTr.getMessage());
+                            }
+                        }
                     } else if ("transacao_ler".equals(operacao)) {
                         String token = (String) req.get("token");
                         if (token == null || token.isBlank()) {
@@ -291,7 +332,6 @@ public class Server extends Thread {
                     System.out.println(ts() + " [SEND] " + who + " <- " + jsonResp);
                 } catch (Exception e) {
                     System.out.println(ts() + " [EXCP] " + who + " " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    // sempre devolve resposta JSON válida para não derrubar client
                     try {
                         out.println(mapper.writeValueAsString(Map.of(
                                 "operacao", "erro_execucao",
