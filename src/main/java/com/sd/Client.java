@@ -180,6 +180,11 @@ public class Client {
                     Map<String, Object> respMap = mapper.readValue(respostaServer, Map.class);
                     boolean status = (Boolean) respMap.getOrDefault("status", false);
                     String info = (String) respMap.getOrDefault("info", "");
+                    // --- CORRIGE ITENS d) e e) ---
+                    if (("usuario_criar".equals(respMap.get("operacao")) || "usuario_login".equals(respMap.get("operacao"))) && !status) {
+                        System.out.println("[ERRO] " + info);
+                        continue;
+                    }
                     if (!status) { System.out.println("[ERRO] " + info); }
                     else { System.out.println("[SUCESSO] " + info); }
                     if ("usuario_login".equals(respMap.get("operacao")) && Boolean.TRUE.equals(respMap.get("status")) && respMap.containsKey("token")) {
@@ -197,17 +202,29 @@ public class Client {
                         System.out.println("========================\n");
                     }
                     if ("transacao_ler".equals(respMap.get("operacao")) && respMap.containsKey("transacoes")) {
-                        List<Map<String, Object>> transacoes = (List<Map<String, Object>>) respMap.get("transacoes");
+                        Object transVal = respMap.get("transacoes");
                         System.out.println("\n=== EXTRATO ===");
-                        if (transacoes.isEmpty()) { System.out.println("Nenhuma transação encontrada neste período."); }
-                        else {
-                            for (Map<String, Object> t : transacoes) {
-                                System.out.println("ID: " + t.get("id")
-                                        + " | Valor: " + t.get("valor_enviado")
-                                        + " | De: " + ((Map) t.get("usuario_enviador")).get("nome")
-                                        + " | Para: " + ((Map) t.get("usuario_recebedor")).get("nome")
-                                        + " | Data: " + t.get("criado_em"));
+                        try {
+                            List<?> transacoes = null;
+                            if (transVal instanceof List) {
+                                transacoes = (List<?>) transVal;
+                            } else if (transVal instanceof Object[]) {
+                                transacoes = Arrays.asList((Object[]) transVal);
                             }
+                            if (transacoes == null || transacoes.isEmpty()) { System.out.println("Nenhuma transação encontrada neste período."); }
+                            else {
+                                for (Object t : transacoes) {
+                                    Map<?,?> mapT = (Map<?,?>) t;
+                                    System.out.println("ID: " + mapT.get("id")
+                                            + " | Valor: " + mapT.get("valor_enviado")
+                                            + " | De: " + ((Map<?,?>) mapT.get("usuario_enviador")).get("nome")
+                                            + " | Para: " + ((Map<?,?>) mapT.get("usuario_recebedor")).get("nome")
+                                            + " | Data: " + mapT.get("criado_em"));
+                                }
+                            }
+                        } catch (Exception errPrint) {
+                            System.out.println("[ERRO] Ao exibir extrato: " + errPrint.getMessage());
+                            System.out.println(transVal);
                         }
                         System.out.println("===============\n");
                     }
