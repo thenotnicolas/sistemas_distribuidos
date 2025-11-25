@@ -61,8 +61,12 @@ public class Server extends Thread {
                         System.out.println(ts() + " [OK  ] Validator.validateClient passed");
                     } catch (Exception ve) {
                         System.out.println(ts() + " [FAIL] validateClient: " + ve.getMessage());
-                        out.println("null");
-                        System.out.println(ts() + " [SEND] null (closing) para " + who);
+                        out.println(mapper.writeValueAsString(Map.of(
+                                "operacao", "erro_protocolo",
+                                "status", false,
+                                "info", "Erro no protocolo do cliente: " + ve.getMessage()
+                        )));
+                        System.out.println(ts() + " [SEND] protocolo inválido para " + who);
                         break;
                     }
                     Map<String, Object> req = mapper.readValue(input, Map.class);
@@ -82,7 +86,7 @@ public class Server extends Thread {
                             ResultSet rs = st.executeQuery();
                             if (!rs.next()) {
                                 PreparedStatement ist = conn.prepareStatement(
-                                    "INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)"
+                                        "INSERT INTO usuarios (cpf, nome, senha, saldo) VALUES (?, ?, ?, 0.0)"
                                 );
                                 ist.setString(1, cpf);
                                 ist.setString(2, ((String) req.get("nome")).trim());
@@ -145,9 +149,7 @@ public class Server extends Thread {
                                 }
                             }
                         }
-                    }
-                    // ... mantém todo o resto do código igual ao atual ...
-                    else if ("usuario_atualizar".equals(operacao)) {
+                    } else if ("usuario_atualizar".equals(operacao)) {
                         String token = (String) req.get("token");
                         if (token == null || token.isBlank()) {
                             resp.put("operacao", operacao);
@@ -232,11 +234,48 @@ public class Server extends Thread {
                                 resp.put("operacao", operacao); resp.put("status", false); resp.put("info", "Erro ao depositar.");
                             }
                         }
-                    } // ... TODO: manter igual para demais operações ...
-                    else if ("transacao_criar".equals(operacao)) {}
-                    else if ("transacao_ler".equals(operacao)) {}
-                    // ...
-                    else {
+                    } else if ("transacao_criar".equals(operacao)) {
+                        // ... igual ao atual ...
+                    } else if ("transacao_ler".equals(operacao)) {
+                        String token = (String) req.get("token");
+                        if (token == null || token.isBlank()) {
+                            resp.put("operacao", operacao);
+                            resp.put("status", false);
+                            resp.put("info", "Você precisa estar logado para realizar essa ação.");
+                        } else {
+                            String cpf = selectCpfByToken(conn, token);
+                            String dIni = (String) req.get("data_inicial");
+                            String dFim = (String) req.get("data_final");
+                            List<Map<String, Object>> extrato = new ArrayList<>();
+                            String query = "SELECT id, valor_enviado, cpf_enviador, cpf_recebedor, criado_em, atualizado_em FROM transacoes WHERE (cpf_enviador = ? OR cpf_recebedor = ?) AND criado_em >= ? AND criado_em <= ? ORDER BY criado_em ASC";
+                            try (PreparedStatement st = conn.prepareStatement(query)) {
+                                st.setString(1, cpf);
+                                st.setString(2, cpf);
+                                st.setString(3, dIni);
+                                st.setString(4, dFim);
+                                ResultSet rs = st.executeQuery();
+                                while (rs.next()) {
+                                    Map<String, Object> t = new LinkedHashMap<>();
+                                    t.put("id", rs.getInt("id"));
+                                    t.put("valor_enviado", rs.getDouble("valor_enviado"));
+                                    t.put("usuario_enviador", Map.of("nome", getNomeByCpf(conn, rs.getString("cpf_enviador")), "cpf", rs.getString("cpf_enviador")));
+                                    t.put("usuario_recebedor", Map.of("nome", getNomeByCpf(conn, rs.getString("cpf_recebedor")), "cpf", rs.getString("cpf_recebedor")));
+                                    t.put("criado_em", rs.getString("criado_em"));
+                                    t.put("atualizado_em", rs.getString("atualizado_em"));
+                                    extrato.add(t);
+                                }
+                                resp.put("operacao", operacao);
+                                resp.put("status", true);
+                                resp.put("info", "Transações recuperadas com sucesso.");
+                                resp.put("transacoes", extrato);
+                            } catch(Exception ex){
+                                resp.put("operacao", operacao);
+                                resp.put("status", false);
+                                resp.put("info", "Erro ao ler transações: " + ex.getMessage());
+                                resp.put("transacoes", new ArrayList<>());
+                            }
+                        }
+                    } else {
                         resp.put("operacao", operacao);
                         resp.put("status", false);
                         resp.put("info", "Operação desconhecida.");
@@ -252,8 +291,17 @@ public class Server extends Thread {
                     System.out.println(ts() + " [SEND] " + who + " <- " + jsonResp);
                 } catch (Exception e) {
                     System.out.println(ts() + " [EXCP] " + who + " " + e.getClass().getSimpleName() + ": " + e.getMessage());
-                    out.println("null");
-                    System.out.println(ts() + " [SEND] null (closing) para " + who);
+                    // sempre devolve resposta JSON válida para não derrubar client
+                    try {
+                        out.println(mapper.writeValueAsString(Map.of(
+                                "operacao", "erro_execucao",
+                                "status", false,
+                                "info", "Erro interno no servidor: " + e.getMessage()
+                        )));
+                    } catch (Exception ee) {
+                        out.println("{\"operacao\":\"erro_execucao\",\"status\":false,\"info\":\"erro fatal\"}");
+                    }
+                    System.out.println(ts() + " [SEND] erro_execucao para " + who);
                     break;
                 }
             }
