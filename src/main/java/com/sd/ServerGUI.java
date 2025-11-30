@@ -285,7 +285,7 @@ public class ServerGUI extends JFrame {
                     }
                 } else if ("usuario_login".equals(op)) {
                     String cpf = ((String) req.get("cpf")).trim();
-                    String senha = ((String) req.get("senha")).trim());
+                    String senha = ((String) req.get("senha")).trim();
                     PreparedStatement st = conn.prepareStatement("SELECT * FROM usuarios WHERE cpf = ? AND senha = ?");
                     st.setString(1, cpf); st.setString(2, senha);
                     ResultSet rs = st.executeQuery();
